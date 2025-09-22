@@ -1,0 +1,63 @@
+RuleID,Logic,Antecedent,ConsequentLabel,Weight
+HR_Below_Severe,AND,"[{""variable"": ""Heart Rate"", ""label"": ""Below normal - severe concern""}]",Severe concern,1.0
+HR_Below_Moderate,AND,"[{""variable"": ""Heart Rate"", ""label"": ""Below normal - moderate concern""}]",Moderate concern,0.4
+HR_Below_Mild,AND,"[{""variable"": ""Heart Rate"", ""label"": ""Below normal - mild concern""}]",Mild concern,0.2
+HR_NoConcern,AND,"[{""variable"": ""Heart Rate"", ""label"": ""No concern""}]",No concern,1.0
+HR_Above_Mild,AND,"[{""variable"": ""Heart Rate"", ""label"": ""Above normal - mild concern""}]",Mild concern,0.2
+HR_Above_Moderate,AND,"[{""variable"": ""Heart Rate"", ""label"": ""Above normal - moderate concern""}]",Moderate concern,0.4
+HR_Above_Severe,AND,"[{""variable"": ""Heart Rate"", ""label"": ""Above normal - severe concern""}]",Severe concern,1.0
+RR_Below_Severe,AND,"[{""variable"": ""Respiratory Rate"", ""label"": ""Below normal - severe concern""}]",Severe concern,1.0
+RR_Below_Moderate,AND,"[{""variable"": ""Respiratory Rate"", ""label"": ""Below normal - moderate concern""}]",Moderate concern,0.4
+RR_Below_Mild,AND,"[{""variable"": ""Respiratory Rate"", ""label"": ""Below normal - mild concern""}]",Mild concern,0.2
+RR_NoConcern,AND,"[{""variable"": ""Respiratory Rate"", ""label"": ""No concern""}]",No concern,1.0
+RR_Above_Mild,AND,"[{""variable"": ""Respiratory Rate"", ""label"": ""Above normal - mild concern""}]",Mild concern,0.2
+RR_Above_Moderate,AND,"[{""variable"": ""Respiratory Rate"", ""label"": ""Above normal - moderate concern""}]",Moderate concern,0.4
+RR_Above_Severe,AND,"[{""variable"": ""Respiratory Rate"", ""label"": ""Above normal - severe concern""}]",Severe concern,1.0
+SBP_Below_Severe,AND,"[{""variable"": ""Systolic Blood Pressure"", ""label"": ""Below normal - severe concern""}]",Severe concern,1.0
+SBP_Below_Moderate,AND,"[{""variable"": ""Systolic Blood Pressure"", ""label"": ""Below normal - moderate concern""}]",Moderate concern,0.4
+SBP_Below_Mild,AND,"[{""variable"": ""Systolic Blood Pressure"", ""label"": ""Below normal - mild concern""}]",Mild concern,0.2
+SBP_NoConcern,AND,"[{""variable"": ""Systolic Blood Pressure"", ""label"": ""No concern""}]",No concern,1.0
+SBP_Above_Mild,AND,"[{""variable"": ""Systolic Blood Pressure"", ""label"": ""Above normal - mild concern""}]",Mild concern,0.2
+SBP_Above_Moderate,AND,"[{""variable"": ""Systolic Blood Pressure"", ""label"": ""Above normal - moderate concern""}]",Moderate concern,0.4
+SBP_Above_Severe,AND,"[{""variable"": ""Systolic Blood Pressure"", ""label"": ""Above normal - severe concern""}]",Severe concern,1.0
+Temp_Below_Severe,AND,"[{""variable"": ""Temperature"", ""label"": ""Below normal - severe concern""}]",Severe concern,1.0
+Temp_Below_Moderate,AND,"[{""variable"": ""Temperature"", ""label"": ""Below normal - moderate concern""}]",Moderate concern,0.4
+Temp_Below_Mild,AND,"[{""variable"": ""Temperature"", ""label"": ""Below normal - mild concern""}]",Mild concern,0.2
+Temp_NoConcern,AND,"[{""variable"": ""Temperature"", ""label"": ""No concern""}]",No concern,1.0
+Temp_Above_Mild,AND,"[{""variable"": ""Temperature"", ""label"": ""Above normal - mild concern""}]",Mild concern,0.2
+Temp_Above_Moderate,AND,"[{""variable"": ""Temperature"", ""label"": ""Above normal - moderate concern""}]",Moderate concern,0.4
+Temp_Above_Severe,AND,"[{""variable"": ""Temperature"", ""label"": ""Above normal - severe concern""}]",Severe concern,1.0
+SpO2_Below_Severe,AND,"[{""variable"": ""Oxygen Saturation"", ""label"": ""Below normal - severe concern""}]",Severe concern,1.0
+SpO2_Below_Moderate,AND,"[{""variable"": ""Oxygen Saturation"", ""label"": ""Below normal - moderate concern""}]",Severe concern,1.0
+SpO2_Below_Mild,AND,"[{""variable"": ""Oxygen Saturation"", ""label"": ""Below normal - mild concern""}]",Moderate concern,0.8
+SpO2_NoConcern,AND,"[{""variable"": ""Oxygen Saturation"", ""label"": ""No concern""}]",No concern,1.0
+FiO2_NoConcern,AND,"[{""variable"": ""Inspired Oxygen Concentration"", ""label"": ""No concern""}]",No concern,1.0
+FiO2_Above_Mild,AND,"[{""variable"": ""Inspired Oxygen Concentration"", ""label"": ""Above normal - mild concern""}]",Mild concern,0.1
+FiO2_Above_Moderate,AND,"[{""variable"": ""Inspired Oxygen Concentration"", ""label"": ""Above normal - moderate concern""}]",Moderate concern,0.2
+FiO2_Above_Severe,AND,"[{""variable"": ""Inspired Oxygen Concentration"", ""label"": ""Above normal - severe concern""}]",Severe concern,0.6
+SuppOx_NoConcern,AND,"[{""variable"": ""Supplementary Oxygen"", ""label"": ""No concern""}]",No concern,1.0
+SuppOx_Above_Mild,AND,"[{""variable"": ""Supplementary Oxygen"", ""label"": ""Above normal - mild concern""}]",Mild concern,0.1
+SuppOx_Above_Moderate,AND,"[{""variable"": ""Supplementary Oxygen"", ""label"": ""Above normal - moderate concern""}]",Moderate concern,0.2
+SuppOx_Above_Severe,AND,"[{""variable"": ""Supplementary Oxygen"", ""label"": ""Above normal - severe concern""}]",Severe concern,0.6
+SpO2_Mild_plus_FiO2_Mild,AND,"[{""variable"": ""Oxygen Saturation"", ""label"": ""Below normal - mild concern""}, {""variable"": ""Inspired Oxygen Concentration"", ""label"": ""Above normal - mild concern""}]",Severe concern,1.0
+SpO2_Moderate_plus_FiO2_Mild,AND,"[{""variable"": ""Oxygen Saturation"", ""label"": ""Below normal - moderate concern""}, {""variable"": ""Inspired Oxygen Concentration"", ""label"": ""Above normal - mild concern""}]",Severe concern,1.0
+SpO2_Moderate_plus_FiO2_Moderate,AND,"[{""variable"": ""Oxygen Saturation"", ""label"": ""Below normal - moderate concern""}, {""variable"": ""Inspired Oxygen Concentration"", ""label"": ""Above normal - moderate concern""}]",Severe concern,1.0
+SpO2_Severe_plus_FiO2_Any,OR,"[{""variable"": ""Oxygen Saturation"", ""label"": ""Below normal - severe concern""}, {""variable"": ""Inspired Oxygen Concentration"", ""label"": ""Above normal - mild concern""}]",Severe concern,1.0
+RR_Mod_plus_SpO2_Mild,AND,"[{""variable"": ""Respiratory Rate"", ""label"": ""Above normal - moderate concern""}, {""variable"": ""Oxygen Saturation"", ""label"": ""Below normal - mild concern""}]",Severe concern,1.0
+RR_Mod_plus_SpO2_Moderate,AND,"[{""variable"": ""Respiratory Rate"", ""label"": ""Above normal - moderate concern""}, {""variable"": ""Oxygen Saturation"", ""label"": ""Below normal - moderate concern""}]",Severe concern,1.0
+RR_Severe_plus_SpO2_Any,OR,"[{""variable"": ""Respiratory Rate"", ""label"": ""Above normal - severe concern""}, {""variable"": ""Oxygen Saturation"", ""label"": ""Below normal - mild concern""}]",Severe concern,1.0
+SBP_LowMod_plus_HR_Mod,AND,"[{""variable"": ""Systolic Blood Pressure"", ""label"": ""Below normal - moderate concern""}, {""variable"": ""Heart Rate"", ""label"": ""Above normal - moderate concern""}]",Severe concern,1.0
+SBP_LowMild_plus_HR_Mild,AND,"[{""variable"": ""Systolic Blood Pressure"", ""label"": ""Below normal - mild concern""}, {""variable"": ""Heart Rate"", ""label"": ""Above normal - mild concern""}]",Severe concern,1.0
+Temp_Mod_plus_HR_Mod,AND,"[{""variable"": ""Temperature"", ""label"": ""Above normal - moderate concern""}, {""variable"": ""Heart Rate"", ""label"": ""Above normal - moderate concern""}]",Severe concern,1.0
+Temp_Severe_plus_HR_Any,OR,"[{""variable"": ""Temperature"", ""label"": ""Above normal - severe concern""}, {""variable"": ""Heart Rate"", ""label"": ""Above normal - mild concern""}]",Severe concern,1.0
+SuppOx_Moderate,AND,"[{""variable"": ""Supplementary Oxygen"", ""label"": ""Above normal - moderate concern""}]",Severe concern,1.0
+SuppOx_Severe,AND,"[{""variable"": ""Supplementary Oxygen"", ""label"": ""Above normal - severe concern""}]",Severe concern,1.0
+All_Normal,AND,"[{""variable"": ""Heart Rate"", ""label"": ""No concern""}, {""variable"": ""Respiratory Rate"", ""label"": ""No concern""}, {""variable"": ""Systolic Blood Pressure"", ""label"": ""No concern""}, {""variable"": ""Temperature"", ""label"": ""No concern""}, {""variable"": ""Oxygen Saturation"", ""label"": ""No concern""}, {""variable"": ""Inspired Oxygen Concentration"", ""label"": ""No concern""}, {""variable"": ""Supplementary Oxygen"", ""label"": ""No concern""}]",No concern,1.0
+All_Normal_DominantLabels,AND,"[{""variable"": ""Heart Rate"", ""label"": ""No concern""}, {""variable"": ""Respiratory Rate"", ""label"": ""No concern""}, {""variable"": ""Systolic Blood Pressure"", ""label"": ""No concern""}, {""variable"": ""Temperature"", ""label"": ""No concern""}, {""variable"": ""Oxygen Saturation"", ""label"": ""No concern""}, {""variable"": ""Inspired Oxygen Concentration"", ""label"": ""Above normal - mild concern""}, {""variable"": ""Supplementary Oxygen"", ""label"": ""Above normal - mild concern""}]",No concern,1.0
+HR_Mod_plus_RR_Mod,AND,"[{""variable"": ""Heart Rate"", ""label"": ""Above normal - moderate concern""}, {""variable"": ""Respiratory Rate"", ""label"": ""Above normal - moderate concern""}]",Severe concern,1.0
+HR_Mod_plus_SBP_Mod,AND,"[{""variable"": ""Heart Rate"", ""label"": ""Above normal - moderate concern""}, {""variable"": ""Systolic Blood Pressure"", ""label"": ""Above normal - moderate concern""}]",Severe concern,1.0
+RR_Mod_plus_SBP_Mod,AND,"[{""variable"": ""Respiratory Rate"", ""label"": ""Above normal - moderate concern""}, {""variable"": ""Systolic Blood Pressure"", ""label"": ""Above normal - moderate concern""}]",Severe concern,1.0
+Temp_Mod_plus_RR_Mod,AND,"[{""variable"": ""Temperature"", ""label"": ""Above normal - moderate concern""}, {""variable"": ""Respiratory Rate"", ""label"": ""Above normal - moderate concern""}]",Severe concern,1.0
+HR_Mild_plus_RR_Mild,AND,"[{""variable"": ""Heart Rate"", ""label"": ""Above normal - mild concern""}, {""variable"": ""Respiratory Rate"", ""label"": ""Above normal - mild concern""}]",Moderate concern,1.0
+HR_Mild_plus_SBP_Mild,AND,"[{""variable"": ""Heart Rate"", ""label"": ""Above normal - mild concern""}, {""variable"": ""Systolic Blood Pressure"", ""label"": ""Above normal - mild concern""}]",Moderate concern,1.0
+RR_Mild_plus_SBP_Mild,AND,"[{""variable"": ""Respiratory Rate"", ""label"": ""Above normal - mild concern""}, {""variable"": ""Systolic Blood Pressure"", ""label"": ""Above normal - mild concern""}]",Moderate concern,1.0
