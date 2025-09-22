@@ -166,16 +166,16 @@ if st.button("Evaluate"):
             <span style='font-size:1.1rem;'>Overall concern is</span>
             <span style='font-size:1.2rem;font-weight:700;'> {concern_pct:.1f}%</span>
             <span style='opacity:0.9'>(~{desc}).</span>
-            <div style='opacity:0.7;font-size:0.9rem;'>Defuzzified on output range [{vmin:g}, {vmax:g}].</div>
+            <div style='opacity:0.7;font-size:0.9rem;'>Calculated from the output scale [{vmin:g}, {vmax:g}].</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.subheader("How we got this result")
+    st.subheader("How this score was calculated")
 
     # Input interpretations in simple language (non-technical)
-    st.markdown("**What the numbers suggest**")
+    st.markdown("**What each number suggests**")
     input_mems = result["input_memberships"]
 
     def friendly(label: str) -> Tuple[str, str]:
@@ -212,12 +212,17 @@ if st.button("Evaluate"):
     st.markdown("\n".join(lines), unsafe_allow_html=True)
 
     # Simple narrative instead of rules list
-    st.markdown("**Why this result?**")
+    st.markdown("**Top signals influencing the score**")
     rule_firings = result["rule_firings"]
-    if rule_firings:
+    # Exclude rules whose consequent is the default 'No concern'
+    rule_firings_non_default = [
+        r for r in rule_firings
+        if str(r.get("ConsequentLabel", "")).strip().lower() != "no concern"
+    ]
+    if rule_firings_non_default:
         # Gather strongest antecedent signals from the strongest fired rules
         candidates = []  # (degree, variable, label)
-        for r in sorted(rule_firings, key=lambda rr: rr.get("FiringStrength", 0.0), reverse=True)[:7]:
+        for r in sorted(rule_firings_non_default, key=lambda rr: rr.get("FiringStrength", 0.0), reverse=True)[:7]:
             if r.get("FiringStrength", 0.0) <= 0:
                 continue
             for a in r.get("Antecedents", []):
@@ -236,7 +241,7 @@ if st.button("Evaluate"):
         if picked:
             lines = []
             for var, lab, deg in picked:
-                lines.append(f"- {var}: mostly interpreted as '{lab}' (~{deg:.2f}).")
+                lines.append(f"- {var}: best matches '{lab}' (confidence ~{deg:.2f}).")
             st.markdown("\n".join(lines))
         else:
             st.markdown("- No strong risk signals were detected.")
@@ -244,7 +249,7 @@ if st.button("Evaluate"):
         st.markdown("- No strong risk signals were detected.")
 
     # Output label activity (grouped influence)
-    st.markdown("**Which concern levels stood out**")
+    st.markdown("**Which concern levels were most active**")
     agg = result["aggregated_output"]
     label_peaks = []
     for label, vec in agg.items():
@@ -262,7 +267,7 @@ if st.button("Evaluate"):
     st.markdown("**What pushed the score up or down**")
     inc_bullets, dec_bullets = [], []
     # Increasing drivers from fired rules' antecedents
-    for r in rule_firings[:10]:
+    for r in rule_firings_non_default[:10]:
         if r.get("FiringStrength", 0.0) <= 0:
             continue
         for a in r.get("Antecedents", []):
@@ -289,9 +294,9 @@ if st.button("Evaluate"):
     # Gentle diagnostic: why some inputs may not change the score much
     with st.expander("If a number seems to have little effect"):
         st.markdown(
-            "- Some values may already be in the 'Normal' range, so pushing them higher/lower doesn't add risk.\n"
-            "- A single signal may be weighted less on its own and matter more when combined with others (e.g., high oxygen needs with low oxygen saturation).\n"
-            "- Changes beyond the charted range are clipped to the nearest value (so going far beyond the max won't change things further).\n"
+            "- If a value is already near 'Normal', moving it a little may not change the score much.\n"
+            "- A single reading can matter more when combined with others (for example, high oxygen needs plus low oxygen saturation).\n"
+            "- Values outside the charted range are clipped to the nearest allowed value.\n"
         )
 
         # Show current dominant label and whether any high-concern rules reference it
@@ -316,10 +321,10 @@ if st.button("Evaluate"):
                 pass
             rows_diag.append({
                 "Variable": var_name,
-                "Most likely": best_label,
+                "Best match": best_label,
                 "Confidence": f"{best_deg:.2f}",
-                "Has strong rule?": "Yes" if has_strong else "No",
-                "Max rule weight": f"{max_weight:.2f}",
+                "Linked to high-concern rule?": "Yes" if has_strong else "No",
+                "Rule importance": f"{max_weight:.2f}",
             })
         st.dataframe(pd.DataFrame(rows_diag), use_container_width=True)
 
@@ -349,7 +354,7 @@ if st.button("Evaluate"):
                 "Δ if nudged up": f"{(up_pct - base_pct):+.2f} pts",
                 "Δ if nudged down": f"{(down_pct - base_pct):+.2f} pts",
             })
-        st.markdown("**Small changes, small effects** — this shows the effect of a small nudge up/down:")
+        st.markdown("**Small changes, small effects** — estimated impact of a small nudge up or down:")
         st.dataframe(pd.DataFrame(step_rows), use_container_width=True)
 
-st.caption("Notes: safer outside-domain policy defaults to **zero**; output percent is a linear rescale of your output 'Value' range to 0–100.")
+st.caption("Notes: values outside the supported range are clipped; the percentage simply rescales the output to 0–100.")
