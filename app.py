@@ -1,6 +1,7 @@
 import os
 from typing import Dict, List, Tuple
 
+import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -49,15 +50,34 @@ try:
     concern_mf = ConcernOutputMF.from_csv(CONCERN_OUTPUT_FILE)
     rules = RuleBase.from_csv(RULES_FILE)
     st.subheader("Settings")
-    aggregation = st.selectbox(
-        "How to combine multiple rules for the same output label",
-        options=["max", "prob_sum"],
-        index=0,
-        help="'max' takes the strongest rule (classic Mamdani). 'prob_sum' softly combines multiple rules: 1 - Π(1 - v).",
-    )
-    engine = MamdaniEngine(registry, concern_mf, rules, aggregation=aggregation)
+    col_set1, col_set2 = st.columns(2)
+    with col_set1:
+        aggregation = st.selectbox(
+            "How to combine multiple rules for the same output label",
+            options=["max", "prob_sum"],
+            index=0,
+            help="'max' takes the strongest rule (classic Mamdani). 'prob_sum' softly combines multiple rules: 1 - Π(1 - v).",
+        )
+    with col_set2:
+        normalize_mfs = st.checkbox(
+            "Normalise MFs to [0,1]",
+            value=False,
+            help="Scale all fuzzy membership functions so that each label reaches a maximum value of 1.0. Useful when some membership functions don't reach full activation."
+        )
+    
+    # Apply normalisation to registry if enabled
+    active_registry = registry.normalize_all() if normalize_mfs else registry
+    
+    # Show normalisation info if enabled
+    if normalize_mfs:
+        stats_before = registry.stats()
+        mfs_needing_norm = [var for var, stat in stats_before.items() if stat['min_max'] < 0.99]
+        if mfs_needing_norm:
+            st.info(f"Normalising {len(mfs_needing_norm)} membership function(s): {', '.join(mfs_needing_norm)}")
+    
+    engine = MamdaniEngine(active_registry, concern_mf, rules, aggregation=aggregation)
 except Exception as e:
-    st.error(f"Error initializing engine: {e}")
+    st.error(f"Error initialising engine: {e}")
     st.stop()
 
 # ------------------ Presets (render BEFORE inputs so they take effect immediately) ------------------
@@ -141,9 +161,127 @@ for i, var in enumerate(registry.variable_names()):
 inputs: Dict[str, float] = {var: float(st.session_state[norm_key(var)]) for var in registry.variable_names()}
 
 # ------------------ Run ------------------
+def calculate_news2(inputs: Dict[str, float]) -> Tuple[int, Dict[str, int], str]:
+    """
+    Calculate NEWS2 score from vital signs.
+    Returns: (total_score, score_breakdown, clinical_risk_level)
+    """
+    scores = {}
+    
+    # Respiratory Rate
+    rr = inputs.get("Respiratory Rate", 0)
+    if rr <= 8:
+        scores["Respiratory Rate"] = 3
+    elif rr <= 11:
+        scores["Respiratory Rate"] = 1
+    elif rr <= 20:
+        scores["Respiratory Rate"] = 0
+    elif rr <= 24:
+        scores["Respiratory Rate"] = 2
+    else:
+        scores["Respiratory Rate"] = 3
+    
+    # SpO2 (Scale 1)
+    spo2 = inputs.get("Oxygen Saturation", 0)
+    if spo2 <= 91:
+        scores["Oxygen Saturation"] = 3
+    elif spo2 <= 93:
+        scores["Oxygen Saturation"] = 2
+    elif spo2 <= 95:
+        scores["Oxygen Saturation"] = 1
+    else:
+        scores["Oxygen Saturation"] = 0
+    
+    # Supplemental Oxygen
+    supp_o2 = inputs.get("Supplementary Oxygen", 0)
+    scores["Supplementary Oxygen"] = 2 if supp_o2 > 0 else 0
+    
+    # Systolic BP
+    sbp = inputs.get("Systolic Blood Pressure", 0)
+    if sbp <= 90:
+        scores["Systolic Blood Pressure"] = 3
+    elif sbp <= 100:
+        scores["Systolic Blood Pressure"] = 2
+    elif sbp <= 110:
+        scores["Systolic Blood Pressure"] = 1
+    elif sbp <= 219:
+        scores["Systolic Blood Pressure"] = 0
+    else:
+        scores["Systolic Blood Pressure"] = 3
+    
+    # Heart Rate (Pulse)
+    hr = inputs.get("Heart Rate", 0)
+    if hr <= 40:
+        scores["Heart Rate"] = 3
+    elif hr <= 50:
+        scores["Heart Rate"] = 1
+    elif hr <= 90:
+        scores["Heart Rate"] = 0
+    elif hr <= 110:
+        scores["Heart Rate"] = 1
+    elif hr <= 130:
+        scores["Heart Rate"] = 2
+    else:
+        scores["Heart Rate"] = 3
+    
+    # Temperature
+    temp = inputs.get("Temperature", 0)
+    if temp <= 35.0:
+        scores["Temperature"] = 3
+    elif temp <= 36.0:
+        scores["Temperature"] = 1
+    elif temp <= 38.0:
+        scores["Temperature"] = 0
+    elif temp <= 39.0:
+        scores["Temperature"] = 1
+    else:
+        scores["Temperature"] = 2
+    
+    total = sum(scores.values())
+    
+    # Clinical risk
+    if total == 0:
+        risk = "Low"
+    elif total <= 4:
+        risk = "Low"
+    elif total <= 6:
+        risk = "Medium"
+    else:
+        risk = "High"
+    
+    return total, scores, risk
+
+# Initialize session state for evaluation results
+if "evaluation_result" not in st.session_state:
+    st.session_state.evaluation_result = None
+
 if st.button("Evaluate"):
     with st.spinner("Running Mamdani inference..."):
         result = engine.evaluate(inputs)
+
+    # Calculate NEWS2
+    news2_score, news2_breakdown, news2_risk = calculate_news2(inputs)
+
+    # Save to session state
+    st.session_state.evaluation_result = {
+        "result": result,
+        "news2_score": news2_score,
+        "news2_breakdown": news2_breakdown,
+        "news2_risk": news2_risk,
+        "inputs": inputs.copy(),
+    }
+    # Clear Monte Carlo results when new evaluation is completed
+    st.session_state.mc_results = None
+    st.session_state.mc_stats = None
+
+# Display results if available
+if st.session_state.evaluation_result is not None:
+    eval_data = st.session_state.evaluation_result
+    result = eval_data["result"]
+    news2_score = eval_data["news2_score"]
+    news2_breakdown = eval_data["news2_breakdown"]
+    news2_risk = eval_data["news2_risk"]
+    inputs = eval_data["inputs"]
 
     # Display headline result (scaled to percent if needed)
     vmin, vmax = result["output_domain"]
@@ -160,6 +298,8 @@ if st.button("Evaluate"):
     else:
         desc, color = "very high", "#b71c1c"
 
+    settings_html = "<div style='opacity:0.7;font-size:0.85rem;margin-top:0.3rem;'>MF normalisation enabled</div>" if normalize_mfs else ""
+    
     st.markdown(
         f"""
         <div style='padding:1rem;border-radius:8px;background:{color}20;border:1px solid {color};'>
@@ -167,59 +307,44 @@ if st.button("Evaluate"):
             <span style='font-size:1.2rem;font-weight:700;'> {concern_pct:.1f}%</span>
             <span style='opacity:0.9'>(~{desc}).</span>
             <div style='opacity:0.7;font-size:0.9rem;'>Calculated from the output scale [{vmin:g}, {vmax:g}].</div>
+            {settings_html}
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.subheader("How this score was calculated")
+    # Create tabs
+    tab1, tab2, tab3 = st.tabs(["Fuzzy Logic Interpretation", "NEWS2 Comparison", "Uncertainty Analysis (Monte Carlo)"])
+    
+    with tab1:
+        st.subheader("How this score was calculated")
 
-    # Input interpretations in simple language (non-technical)
-    st.markdown("**What each number suggests**")
-    input_mems = result["input_memberships"]
+        # Input interpretations in simple language (non-technical)
+        input_mems = result["input_memberships"]
 
-    def friendly(label: str) -> Tuple[str, str]:
-        ll = label.lower()
-        if ll == "no concern":
-            return ("Normal", "#2e7d32")
-        if "severe" in ll:
-            return ("Very abnormal", "#b71c1c")
-        if "moderate" in ll:
-            return ("Abnormal", "#ef6c00")
-        if "mild" in ll:
-            return ("Slightly abnormal", "#f9a825")
-        if "above normal" in ll:
-            return ("High", "#ef6c00")
-        if "below normal" in ll:
-            return ("Low", "#ef6c00")
-        return (label.title(), "#607d8b")
+        def friendly(label: str) -> Tuple[str, str]:
+            ll = label.lower()
+            if ll == "no concern":
+                return ("Normal", "#2e7d32")
+            if "severe" in ll:
+                return ("Very abnormal", "#b71c1c")
+            if "moderate" in ll:
+                return ("Abnormal", "#ef6c00")
+            if "mild" in ll:
+                return ("Slightly abnormal", "#f9a825")
+            if "above normal" in ll:
+                return ("High", "#ef6c00")
+            if "below normal" in ll:
+                return ("Low", "#ef6c00")
+            return (label.title(), "#607d8b")
 
-    lines = []
-    for var_name, x in inputs.items():
-        mems = input_mems[var_name]
-        # choose the single best-matching label
-        best_label, best_deg = max(mems.items(), key=lambda kv: kv[1])
-        phrase, color = friendly(best_label)
-        line = (
-            f"<div style='margin:4px 0;'>"
-            f"<strong>{var_name}</strong> at <strong>{x:g}</strong>: "
-            f"<span style='display:inline-block;padding:2px 8px;border-radius:12px;background:{color}20;border:1px solid {color};color:{color};'>"
-            f"{phrase}"
-            f"</span>"
-            f"</div>"
-        )
-        lines.append(line)
-    st.markdown("\n".join(lines), unsafe_allow_html=True)
-
-    # Simple narrative instead of rules list
-    st.markdown("**Top signals influencing the score**")
-    rule_firings = result["rule_firings"]
-    # Exclude rules whose consequent is the default 'No concern'
-    rule_firings_non_default = [
-        r for r in rule_firings
-        if str(r.get("ConsequentLabel", "")).strip().lower() != "no concern"
-    ]
-    if rule_firings_non_default:
+        # Get rule firings for top signals
+        rule_firings = result["rule_firings"]
+        rule_firings_non_default = [
+            r for r in rule_firings
+            if str(r.get("ConsequentLabel", "")).strip().lower() != "no concern"
+        ]
+        
         # Gather strongest antecedent signals from the strongest fired rules
         candidates = []  # (degree, variable, label)
         for r in sorted(rule_firings_non_default, key=lambda rr: rr.get("FiringStrength", 0.0), reverse=True)[:7]:
@@ -228,133 +353,317 @@ if st.button("Evaluate"):
             for a in r.get("Antecedents", []):
                 candidates.append((float(a.get("degree", 0.0)), str(a.get("variable", "")), str(a.get("label", ""))))
         candidates.sort(reverse=True)
-        # Deduplicate by variable, keep top 3
-        picked = []
-        seen_vars = set()
+        
+        # Deduplicate by variable
+        top_signals_dict = {}
         for deg, var, lab in candidates:
-            if var in seen_vars:
+            if var not in top_signals_dict:
+                top_signals_dict[var] = (lab, deg)
+        
+        # Collect raising and lowering factors
+        inc_factors, dec_factors = {}, {}
+        for r in rule_firings_non_default[:10]:
+            if r.get("FiringStrength", 0.0) <= 0:
                 continue
-            seen_vars.add(var)
-            picked.append((var, lab, deg))
-            if len(picked) == 3:
-                break
-        if picked:
-            lines = []
-            for var, lab, deg in picked:
-                lines.append(f"- {var}: best matches '{lab}' (confidence ~{deg:.2f}).")
-            st.markdown("\n".join(lines))
-        else:
-            st.markdown("- No strong risk signals were detected.")
-    else:
-        st.markdown("- No strong risk signals were detected.")
-
-    # Output label activity (grouped influence)
-    st.markdown("**Which concern levels were most active**")
-    agg = result["aggregated_output"]
-    label_peaks = []
-    for label, vec in agg.items():
-        v = np.array(vec, dtype=float)
-        peak = float(np.max(v)) if v.size else 0.0
-        label_peaks.append((label, peak))
-    label_peaks.sort(key=lambda x: x[1], reverse=True)
-    if label_peaks and max(p for _, p in label_peaks) > 0:
-        df_peaks = pd.DataFrame(label_peaks, columns=["Concern level", "Peak activation"]).set_index("Concern level")
-        st.bar_chart(df_peaks)
-    else:
-        st.markdown("- No output labels were activated.")
-
-    # Drivers: what raised vs lowered the concern
-    st.markdown("**What pushed the score up or down**")
-    inc_bullets, dec_bullets = [], []
-    # Increasing drivers from fired rules' antecedents
-    for r in rule_firings_non_default[:10]:
-        if r.get("FiringStrength", 0.0) <= 0:
-            continue
-        for a in r.get("Antecedents", []):
-            label = str(a.get("label", ""))
-            var = str(a.get("variable", ""))
-            deg = float(a.get("degree", 0.0))
-            if any(key in label.lower() for key in ["above normal", "below normal", "severe", "moderate", "mild"]):
-                inc_bullets.append(f"- {var}: '{label}' (~{deg:.2f})")
-    # Decreasing drivers (reassuring) from inputs with high 'No concern'
-    for var_name, mems in input_mems.items():
-        nc = mems.get("No concern", 0.0)
-        if nc >= 0.7:
-            dec_bullets.append(f"- {var_name}: 'No concern' is strong (~{nc:.2f})")
-    cols = st.columns(2)
-    with cols[0]:
-        st.markdown("**Things raising concern**")
-        st.markdown("\n".join(inc_bullets[:6]) or "- None prominent.")
-    with cols[1]:
-        st.markdown("**Things lowering concern**")
-        st.markdown("\n".join(dec_bullets[:6]) or "- None prominent.")
-
-    # (Optional diagnostics removed to keep this app minimal and error-free.)
-
-    # Gentle diagnostic: why some inputs may not change the score much
-    with st.expander("If a number seems to have little effect"):
-        st.markdown(
-            "- If a value is already near 'Normal', moving it a little may not change the score much.\n"
-            "- A single reading can matter more when combined with others (for example, high oxygen needs plus low oxygen saturation).\n"
-            "- Values outside the charted range are clipped to the nearest allowed value.\n"
-        )
-
-        # Show current dominant label and whether any high-concern rules reference it
-        rows_diag = []
+            for a in r.get("Antecedents", []):
+                label = str(a.get("label", ""))
+                var = str(a.get("variable", ""))
+                deg = float(a.get("degree", 0.0))
+                if any(key in label.lower() for key in ["above normal", "below normal", "severe", "moderate", "mild"]):
+                    if var not in inc_factors or deg > inc_factors[var][1]:
+                        inc_factors[var] = (label, deg)
+        
+        for var_name, mems in input_mems.items():
+            nc = mems.get("No concern", 0.0)
+            if nc >= 0.7:
+                dec_factors[var_name] = ("No concern", nc)
+        
+        # Build interpretability table
+        table_rows = []
         for var_name in registry.variable_names():
-            mems = input_mems.get(var_name, {})
-            if not mems:
-                continue
+            x = inputs[var_name]
+            mems = input_mems[var_name]
+            
+            # What each number suggests
             best_label, best_deg = max(mems.items(), key=lambda kv: kv[1])
-            # scan rule base for any rule that includes (var_name, best_label)
-            has_strong = False
-            max_weight = 0.0
-            target_conseq = None
-            try:
-                for r in rules.rules:
-                    if any((a == var_name or a.lower() == var_name.lower()) and b == best_label for (a, b) in r.antecedent):
-                        max_weight = max(max_weight, float(getattr(r, 'weight', 1.0)))
-                        if r.consequent_label.lower() in {"high", "very high"}:
-                            has_strong = True
-                            target_conseq = r.consequent_label
-            except Exception:
-                pass
-            rows_diag.append({
+            phrase, _ = friendly(best_label)
+            what_suggests = f"{phrase} ({x:g})"
+            
+            # Top signals influencing
+            if var_name in top_signals_dict:
+                sig_label, sig_deg = top_signals_dict[var_name]
+                top_signal = f"{sig_label} (~{sig_deg:.2f})"
+            else:
+                top_signal = "—"
+            
+            # Raising/Lowering concern
+            concern_change = []
+            if var_name in inc_factors:
+                inc_label, inc_deg = inc_factors[var_name]
+                concern_change.append(f"↑ {inc_label} ({inc_deg:.2f})")
+            if var_name in dec_factors:
+                dec_label, dec_deg = dec_factors[var_name]
+                concern_change.append(f"↓ {dec_label} ({dec_deg:.2f})")
+            concern_str = ", ".join(concern_change) if concern_change else "—"
+            
+            table_rows.append({
                 "Variable": var_name,
-                "Best match": best_label,
-                "Confidence": f"{best_deg:.2f}",
-                "Linked to high-concern rule?": "Yes" if has_strong else "No",
-                "Rule importance": f"{max_weight:.2f}",
+                "What Each Number Suggests": what_suggests,
+                "Top Signals Influencing": top_signal,
+                "Raising/Lowering Concern": concern_str
             })
-        st.dataframe(pd.DataFrame(rows_diag), use_container_width=True)
-
-        # Quick local sensitivity: nudge each input by a small step and show Δ in concern percent
-        def _evaluate_with(inputs_override: Dict[str, float]) -> float:
-            res2 = engine.evaluate(inputs_override)
-            return float(res2.get("concern_percent", 0.0))
-
-        step_rows = []
-        base_pct = concern_pct
-        for var_name in registry.variable_names():
-            mf = registry.get(var_name)
-            vmin, vmax = float(mf.values[0]), float(mf.values[-1])
-            span = max(1e-9, vmax - vmin)
-            step = 0.05 * span  # 5% of range
-            base_val = inputs[var_name]
-            up_val = float(np.clip(base_val + step, vmin, vmax))
-            down_val = float(np.clip(base_val - step, vmin, vmax))
-            test_up = dict(inputs)
-            test_down = dict(inputs)
-            test_up[var_name] = up_val
-            test_down[var_name] = down_val
-            up_pct = _evaluate_with(test_up)
-            down_pct = _evaluate_with(test_down)
-            step_rows.append({
-                "Variable": var_name,
-                "Δ if nudged up": f"{(up_pct - base_pct):+.2f} pts",
-                "Δ if nudged down": f"{(down_pct - base_pct):+.2f} pts",
+        
+        st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+    
+    with tab2:
+        st.subheader("NEWS2 vs Fuzzy Logic Comparison")
+        
+        # Side-by-side comparison
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### NEWS2 Score")
+            # Colour code NEWS2 based on risk
+            if news2_risk == "Low":
+                news2_color = "#2e7d32"
+            elif news2_risk == "Medium":
+                news2_color = "#f9a825"
+            else:
+                news2_color = "#b71c1c"
+            
+            st.markdown(
+                f"""
+                <div style='padding:1rem;border-radius:8px;background:{news2_color}20;border:1px solid {news2_color};'>
+                    <span style='font-size:1.1rem;'>NEWS2 Score:</span>
+                    <span style='font-size:1.2rem;font-weight:700;'> {news2_score}</span>
+                    <div style='opacity:0.9;margin-top:0.5rem;'>Clinical Risk: <strong>{news2_risk}</strong></div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            
+            st.markdown("**Score Breakdown:**")
+            breakdown_df = pd.DataFrame([
+                {"Parameter": k, "Value": inputs.get(k, "N/A"), "Points": v}
+                for k, v in news2_breakdown.items()
+            ])
+            st.dataframe(breakdown_df, use_container_width=True, hide_index=True)
+            
+            st.info("**Note:** NEWS2 does not include consciousness level (AVPU) in this calculation, as it is not part of the input vitals.")
+        
+        with col2:
+            st.markdown("### Fuzzy Logic Score")
+            st.markdown(
+                f"""
+                <div style='padding:1rem;border-radius:8px;background:{color}20;border:1px solid {color};'>
+                    <span style='font-size:1.1rem;'>Concern:</span>
+                    <span style='font-size:1.2rem;font-weight:700;'> {concern_pct:.1f}%</span>
+                    <div style='opacity:0.9;margin-top:0.5rem;'>Level: <strong>{desc.title()}</strong></div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    
+    with tab3:
+        st.subheader("Uncertainty Analysis via Monte Carlo Simulation")
+        
+        st.markdown("""
+        This analysis quantifies how **measurement uncertainty** in vital signs affects the concern score.
+        Each input is perturbed according to typical clinical measurement error, and the fuzzy inference
+        is run multiple times to generate a distribution of possible outputs.
+        """)
+        
+        # Default measurement uncertainties (standard deviations)
+        default_uncertainties = {
+            "Heart Rate": 2.5,
+            "Respiratory Rate": 1.5,
+            "Systolic Blood Pressure": 5.0,
+            "Temperature": 0.2,
+            "Oxygen Saturation": 2.0,
+            "Inspired Oxygen Concentration": 2.0,
+            "Supplementary Oxygen": 0.5,
+        }
+        
+        col_mc1, col_mc2 = st.columns([2, 1])
+        
+        with col_mc1:
+            n_samples = st.slider("Number of Monte Carlo samples", 100, 2000, 500, step=100,
+                                  help="More samples = more accurate uncertainty estimates but slower computation")
+        
+        with col_mc2:
+            show_uncertainties = st.checkbox("Customise uncertainties", value=False)
+        
+        # Allow user to customise uncertainties if desired
+        uncertainties = default_uncertainties.copy()
+        if show_uncertainties:
+            st.markdown("**Measurement uncertainties (± standard deviation):**")
+            unc_cols = st.columns(3)
+            for idx, (var, default_unc) in enumerate(default_uncertainties.items()):
+                with unc_cols[idx % 3]:
+                    uncertainties[var] = st.number_input(
+                        f"{var}",
+                        min_value=0.0,
+                        value=default_unc,
+                        step=0.1,
+                        format="%.2f",
+                        key=f"unc_{var}"
+                    )
+        
+        # Initialize session state for MC results
+        if "mc_results" not in st.session_state:
+            st.session_state.mc_results = None
+            st.session_state.mc_stats = None
+        
+        if st.button("Run Monte Carlo Analysis", key="run_mc"):
+            with st.spinner(f"Running {n_samples} simulations..."):
+                # Run Monte Carlo
+                mc_results = []
+                
+                for _ in range(n_samples):
+                    # Perturb inputs
+                    perturbed_inputs = {}
+                    for var_name, value in inputs.items():
+                        mf = registry.get(var_name)
+                        vmin, vmax = float(mf.values[0]), float(mf.values[-1])
+                        
+                        # Sample from normal distribution
+                        unc = uncertainties.get(var_name, 0.0)
+                        perturbed_value = np.random.normal(value, unc)
+                        
+                        # Clip to valid range
+                        perturbed_value = float(np.clip(perturbed_value, vmin, vmax))
+                        perturbed_inputs[var_name] = perturbed_value
+                    
+                    # Evaluate with perturbed inputs
+                    mc_result = engine.evaluate(perturbed_inputs)
+                    mc_results.append(mc_result["concern_percent"])
+                
+                mc_results = np.array(mc_results)
+                
+                # Statistics
+                mean_concern = np.mean(mc_results)
+                std_concern = np.std(mc_results)
+                ci_lower = np.percentile(mc_results, 2.5)
+                ci_upper = np.percentile(mc_results, 97.5)
+                
+                # Save to session state
+                st.session_state.mc_results = mc_results
+                st.session_state.mc_stats = {
+                    "mean": mean_concern,
+                    "std": std_concern,
+                    "ci_lower": ci_lower,
+                    "ci_upper": ci_upper,
+                    "base_concern": concern_pct,
+                    "uncertainties": uncertainties.copy(),
+                    "inputs": inputs.copy()
+                }
+        
+        # Display results if available
+        if st.session_state.mc_results is not None:
+            mc_results = st.session_state.mc_results
+            stats = st.session_state.mc_stats
+            mean_concern = stats["mean"]
+            std_concern = stats["std"]
+            ci_lower = stats["ci_lower"]
+            ci_upper = stats["ci_upper"]
+            base_concern_mc = stats["base_concern"]
+            
+            # Display results
+            st.markdown("---")
+            st.markdown("### Results")
+            
+            col_r1, col_r2, col_r3 = st.columns(3)
+            
+            with col_r1:
+                st.metric("Mean Concern", f"{mean_concern:.1f}%", 
+                         delta=f"{mean_concern - base_concern_mc:+.1f}% from base")
+            
+            with col_r2:
+                st.metric("Std Deviation", f"{std_concern:.2f}%")
+            
+            with col_r3:
+                st.metric("95% CI", f"[{ci_lower:.1f}%, {ci_upper:.1f}%]")
+            
+            # Interpretation
+            if std_concern < 2:
+                robustness = "Very Robust"
+                rob_color = "#2e7d32"
+            elif std_concern < 5:
+                robustness = "Robust"
+                rob_color = "#689f38"
+            elif std_concern < 10:
+                robustness = "Moderate"
+                rob_color = "#f9a825"
+            else:
+                robustness = "Sensitive"
+                rob_color = "#ef6c00"
+            
+            st.markdown(
+                f"""
+                <div style='padding:0.8rem;border-radius:6px;background:{rob_color}20;border:1px solid {rob_color};margin:1rem 0;'>
+                    <strong>Robustness:</strong> {robustness}
+                    <div style='opacity:0.8;font-size:0.9rem;margin-top:0.3rem;'>
+                    A low standard deviation indicates the score is stable despite measurement errors.
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            
+            # Histogram
+            st.markdown("**Distribution of Concern Scores:**")
+            hist_data = pd.DataFrame({
+                "Concern (%)": mc_results
             })
-        st.markdown("**Small changes, small effects** — estimated impact of a small nudge up or down:")
-        st.dataframe(pd.DataFrame(step_rows), use_container_width=True)
+            
+            chart = alt.Chart(hist_data).mark_bar(opacity=0.7).encode(
+                alt.X("Concern (%):Q", bin=alt.Bin(maxbins=30), title="Concern (%)"),
+                alt.Y("count()", title="Frequency"),
+                tooltip=["count()"]
+            ).properties(height=300)
+            
+            # Add vertical line for base score
+            base_line = alt.Chart(pd.DataFrame({"x": [base_concern_mc]})).mark_rule(
+                color="red", strokeDash=[5, 5], size=2
+            ).encode(x="x:Q")
+            
+            st.altair_chart(chart + base_line, use_container_width=True)
+            
+            # Sensitivity breakdown
+            st.markdown("**Sensitivity Analysis:**")
+            st.markdown("Which inputs contribute most to output uncertainty?")
+            
+            # Compute variance contribution for each input
+            sensitivities = []
+            saved_inputs = stats["inputs"]
+            saved_uncertainties = stats["uncertainties"]
+            for var_name in saved_inputs.keys():
+                # Run mini MC varying only this input
+                mini_results = []
+                for _ in range(100):
+                    test_inputs = saved_inputs.copy()
+                    mf = registry.get(var_name)
+                    vmin, vmax = float(mf.values[0]), float(mf.values[-1])
+                    unc = saved_uncertainties.get(var_name, 0.0)
+                    perturbed = np.random.normal(saved_inputs[var_name], unc)
+                    test_inputs[var_name] = float(np.clip(perturbed, vmin, vmax))
+                    mini_result = engine.evaluate(test_inputs)
+                    mini_results.append(mini_result["concern_percent"])
+                
+                var_contribution = np.std(mini_results)
+                sensitivities.append({
+                    "Variable": var_name,
+                    "Uncertainty (±)": f"{saved_uncertainties.get(var_name, 0):.2f}",
+                    "Output Variance Contribution (%)": f"{var_contribution:.2f}"
+                })
+            
+            sens_df = pd.DataFrame(sensitivities).sort_values(
+                "Output Variance Contribution (%)", 
+                ascending=False,
+                key=lambda x: x.str.replace("%", "").astype(float)
+            )
+            st.dataframe(sens_df, use_container_width=True, hide_index=True)
+            
+            st.info("**Interpretation:** Variables with higher variance contribution have more impact on uncertainty. Consider measuring these more carefully.")
 
 st.caption("Notes: values outside the supported range are clipped; the percentage simply rescales the output to 0–100.")

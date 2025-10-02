@@ -96,6 +96,23 @@ class MembershipFunctionSet:
     def domain(self) -> Tuple[float, float]:
         return float(self.values[0]), float(self.values[-1])
 
+    def normalize(self) -> "MembershipFunctionSet":
+        """
+        Return a new MembershipFunctionSet where each label's membership values
+        are scaled so that the maximum value is 1.0.
+        """
+        normalized_matrix = self.matrix.copy()
+        for i in range(normalized_matrix.shape[1]):  # For each label
+            max_val = np.max(normalized_matrix[:, i])
+            if max_val > 0:
+                normalized_matrix[:, i] = normalized_matrix[:, i] / max_val
+        return MembershipFunctionSet(
+            name=self.name,
+            values=self.values.copy(),
+            labels=self.labels.copy(),
+            matrix=normalized_matrix
+        )
+
 
 # -----------------------------
 # Registry for variables
@@ -143,6 +160,14 @@ class FuzzyVariableRegistry:
 
     def stats(self) -> Dict[str, Dict[str, float]]:
         return {k: v.coverage_stats() for k, v in self._vars.items()}
+
+    def normalize_all(self) -> "FuzzyVariableRegistry":
+        """
+        Return a new registry where all membership functions are normalized
+        so that each label's maximum value is 1.0.
+        """
+        normalized_vars = {k: v.normalize() for k, v in self._vars.items()}
+        return FuzzyVariableRegistry(normalized_vars)
 
 
 def _normalize(s: str) -> str:
@@ -294,6 +319,7 @@ class MamdaniEngine:
         rules: RuleBase,
         aggregation: str = "max",
         outside_behavior: str = "zero",   # safer clinical default
+        rule_operator: str = "min_max",   # "min_max" or "probabilistic"
     ):
         self.registry = registry
         self.output = output_mf
@@ -305,6 +331,11 @@ class MamdaniEngine:
         if outside_behavior not in {"edge", "zero"}:
             outside_behavior = "zero"
         self.outside_behavior = outside_behavior
+        
+        op = rule_operator.strip().lower()
+        if op not in {"min_max", "probabilistic"}:
+            op = "min_max"
+        self.rule_operator = op
 
     def _fuzzify_all(self, crisp_inputs: Dict[str, float]) -> Dict[str, Dict[str, float]]:
         out: Dict[str, Dict[str, float]] = {}
@@ -342,10 +373,20 @@ class MamdaniEngine:
 
             if not degrees:
                 fire = 1.0
-            elif rule.logic == "AND":
-                fire = float(np.min(degrees))
+            elif self.rule_operator == "probabilistic":
+                # Probabilistic operators
+                if rule.logic == "AND":
+                    # Probabilistic product: a * b * c * ...
+                    fire = float(np.prod(degrees))
+                else:
+                    # Probabilistic sum: 1 - (1-a)*(1-b)*(1-c)*...
+                    fire = 1.0 - float(np.prod([1.0 - d for d in degrees]))
             else:
-                fire = float(np.max(degrees))
+                # Standard min/max operators
+                if rule.logic == "AND":
+                    fire = float(np.min(degrees))
+                else:
+                    fire = float(np.max(degrees))
 
             fire = float(np.clip(fire * max(0.0, rule.weight), 0.0, 1.0))
 
