@@ -51,6 +51,7 @@ try:
     rules = RuleBase.from_csv(RULES_FILE)
     st.subheader("Settings")
     col_set1, col_set2 = st.columns(2)
+    
     with col_set1:
         aggregation = st.selectbox(
             "How to combine multiple rules for the same output label",
@@ -58,24 +59,16 @@ try:
             index=0,
             help="'max' takes the strongest rule (classic Mamdani). 'prob_sum' softly combines multiple rules: 1 - Π(1 - v).",
         )
+    
     with col_set2:
-        normalize_mfs = st.checkbox(
-            "Normalise MFs to [0,1]",
-            value=False,
-            help="Scale all fuzzy membership functions so that each label reaches a maximum value of 1.0. Useful when some membership functions don't reach full activation."
+        oxygen_mode = st.selectbox(
+            "Oxygen measurement method",
+            options=["Supplementary Oxygen (L/min)", "Inspired Oxygen Concentration (FiO2 %)"],
+            index=0,
+            help="Choose which oxygen variable to use. Both measure oxygen delivery but in different ways.",
         )
     
-    # Apply normalisation to registry if enabled
-    active_registry = registry.normalize_all() if normalize_mfs else registry
-    
-    # Show normalisation info if enabled
-    if normalize_mfs:
-        stats_before = registry.stats()
-        mfs_needing_norm = [var for var, stat in stats_before.items() if stat['min_max'] < 0.99]
-        if mfs_needing_norm:
-            st.info(f"Normalising {len(mfs_needing_norm)} membership function(s): {', '.join(mfs_needing_norm)}")
-    
-    engine = MamdaniEngine(active_registry, concern_mf, rules, aggregation=aggregation)
+    engine = MamdaniEngine(registry, concern_mf, rules, aggregation=aggregation)
 except Exception as e:
     st.error(f"Error initialising engine: {e}")
     st.stop()
@@ -146,8 +139,20 @@ with st.expander("Quick presets"):
 
 # ------------------ Inputs ------------------
 st.subheader("Enter the vital signs")
+
+# Determine which oxygen variable to show based on selection
+if "Supplementary Oxygen" in oxygen_mode:
+    active_oxygen_var = "Supplementary Oxygen"
+    inactive_oxygen_var = "Inspired Oxygen Concentration"
+else:
+    active_oxygen_var = "Inspired Oxygen Concentration"
+    inactive_oxygen_var = "Supplementary Oxygen"
+
+# Filter variables: show all except the inactive oxygen variable
+visible_vars = [v for v in registry.variable_names() if v != inactive_oxygen_var]
+
 cols = st.columns(2)
-for i, var in enumerate(registry.variable_names()):
+for i, var in enumerate(visible_vars):
     mf = registry.get(var)
     vmin, vmax = float(mf.values[0]), float(mf.values[-1])
     default = float(np.clip(np.nanmedian(mf.values), vmin, vmax))
@@ -157,8 +162,18 @@ for i, var in enumerate(registry.variable_names()):
     with cols[i % 2]:
         st.number_input(var, min_value=vmin, max_value=vmax, value=st.session_state[key], step=(vmax - vmin) / 100.0, key=key)
 
-# Build dict
-inputs: Dict[str, float] = {var: float(st.session_state[norm_key(var)]) for var in registry.variable_names()}
+# Build dict - include all variables, set inactive oxygen to baseline (no concern value)
+inputs: Dict[str, float] = {}
+for var in registry.variable_names():
+    if var == inactive_oxygen_var:
+        # Set to baseline "no concern" value for the unused oxygen variable
+        mf = registry.get(var)
+        if var == "Supplementary Oxygen":
+            inputs[var] = 0.0  # 0 L/min = room air
+        else:  # Inspired Oxygen Concentration
+            inputs[var] = 21.0  # 21% = room air
+    else:
+        inputs[var] = float(st.session_state[norm_key(var)])
 
 # ------------------ Run ------------------
 def calculate_news2(inputs: Dict[str, float]) -> Tuple[int, Dict[str, int], str]:
@@ -298,7 +313,7 @@ if st.session_state.evaluation_result is not None:
     else:
         desc, color = "very high", "#b71c1c"
 
-    settings_html = "<div style='opacity:0.7;font-size:0.85rem;margin-top:0.3rem;'>MF normalisation enabled</div>" if normalize_mfs else ""
+    settings_html = ""
     
     st.markdown(
         f"""
@@ -323,19 +338,35 @@ if st.session_state.evaluation_result is not None:
         input_mems = result["input_memberships"]
 
         def friendly(label: str) -> Tuple[str, str]:
+            """Convert label to readable format with color"""
             ll = label.lower()
-            if ll == "no concern":
+            # Handle "No concern - Normal" format
+            if "no concern" in ll:
                 return ("Normal", "#2e7d32")
-            if "severe" in ll:
-                return ("Very abnormal", "#b71c1c")
-            if "moderate" in ll:
-                return ("Abnormal", "#ef6c00")
-            if "mild" in ll:
-                return ("Slightly abnormal", "#f9a825")
+            # Handle severity levels with above/below
+            if "severe" in ll and "concern" in ll:
+                if "above" in ll:
+                    return ("Above normal - severe concern", "#b71c1c")
+                elif "below" in ll:
+                    return ("Below normal - severe concern", "#b71c1c")
+                return ("Severe concern", "#b71c1c")
+            if "moderate" in ll and "concern" in ll:
+                if "above" in ll:
+                    return ("Above normal - moderate concern", "#ef6c00")
+                elif "below" in ll:
+                    return ("Below normal - moderate concern", "#ef6c00")
+                return ("Moderate concern", "#ef6c00")
+            if "mild" in ll and "concern" in ll:
+                if "above" in ll:
+                    return ("Above normal - mild concern", "#f9a825")
+                elif "below" in ll:
+                    return ("Below normal - mild concern", "#f9a825")
+                return ("Mild concern", "#f9a825")
+            # Fallback for any other variations
             if "above normal" in ll:
-                return ("High", "#ef6c00")
+                return ("Above normal", "#ef6c00")
             if "below normal" in ll:
-                return ("Low", "#ef6c00")
+                return ("Below normal", "#ef6c00")
             return (label.title(), "#607d8b")
 
         # Get rule firings for top signals
@@ -345,78 +376,92 @@ if st.session_state.evaluation_result is not None:
             if str(r.get("ConsequentLabel", "")).strip().lower() != "no concern"
         ]
         
-        # Gather strongest antecedent signals from the strongest fired rules
-        candidates = []  # (degree, variable, label)
-        for r in sorted(rule_firings_non_default, key=lambda rr: rr.get("FiringStrength", 0.0), reverse=True)[:7]:
-            if r.get("FiringStrength", 0.0) <= 0:
-                continue
-            for a in r.get("Antecedents", []):
-                candidates.append((float(a.get("degree", 0.0)), str(a.get("variable", "")), str(a.get("label", ""))))
-        candidates.sort(reverse=True)
+        def interpret_degree(deg: float) -> str:
+            """Convert fuzzy degree to clinician-friendly description"""
+            if deg >= 0.8:
+                return "Strongly indicates"
+            elif deg >= 0.5:
+                return "Indicates"
+            elif deg >= 0.3:
+                return "Somewhat indicates"
+            elif deg > 0:
+                return "Slightly indicates"
+            else:
+                return "Not present"
         
-        # Deduplicate by variable
-        top_signals_dict = {}
-        for deg, var, lab in candidates:
-            if var not in top_signals_dict:
-                top_signals_dict[var] = (lab, deg)
-        
-        # Collect raising and lowering factors
-        inc_factors, dec_factors = {}, {}
-        for r in rule_firings_non_default[:10]:
-            if r.get("FiringStrength", 0.0) <= 0:
-                continue
-            for a in r.get("Antecedents", []):
-                label = str(a.get("label", ""))
-                var = str(a.get("variable", ""))
-                deg = float(a.get("degree", 0.0))
-                if any(key in label.lower() for key in ["above normal", "below normal", "severe", "moderate", "mild"]):
-                    if var not in inc_factors or deg > inc_factors[var][1]:
-                        inc_factors[var] = (label, deg)
-        
-        for var_name, mems in input_mems.items():
-            nc = mems.get("No concern", 0.0)
-            if nc >= 0.7:
-                dec_factors[var_name] = ("No concern", nc)
+        def simplify_label(label: str) -> str:
+            """Convert fuzzy labels to readable format - keep original format"""
+            ll = label.lower()
+            if "no concern" in ll:
+                return "normal"
+            # Return the label as-is but lowercased for consistency in messages
+            return ll
         
         # Build interpretability table
         table_rows = []
-        for var_name in registry.variable_names():
+        for var_name in visible_vars:  # Only show visible variables (excludes inactive oxygen variable)
             x = inputs[var_name]
             mems = input_mems[var_name]
             
-            # What each number suggests
+            # Current status based on measurements
             best_label, best_deg = max(mems.items(), key=lambda kv: kv[1])
             phrase, _ = friendly(best_label)
-            what_suggests = f"{phrase} ({x:g})"
             
-            # Top signals influencing
-            if var_name in top_signals_dict:
-                sig_label, sig_deg = top_signals_dict[var_name]
-                top_signal = f"{sig_label} (~{sig_deg:.2f})"
+            # Just show the highest membership label
+            status = phrase
+            
+            # Effect on concern score - simpler logic based on membership values
+            nc = mems.get("No concern", 0.0)
+            
+            # If clearly within normal range
+            if nc >= 0.6 and best_deg >= 0.6:
+                effect_str = "Within normal range, not raising concern"
+            # If the strongest membership is abnormal
+            elif best_deg >= 0.3 and best_label.lower() != "no concern":
+                simple = simplify_label(best_label)
+                
+                # Check if any rules with this variable are actually firing
+                found_firing_rule = False
+                max_firing = 0.0
+                for r in rule_firings_non_default:
+                    firing = r.get("FiringStrength", 0.0)
+                    if firing > 0.01:
+                        for a in r.get("Antecedents", []):
+                            if str(a.get("variable", "")) == var_name:
+                                deg = float(a.get("degree", 0.0))
+                                if deg > 0.1:
+                                    found_firing_rule = True
+                                    max_firing = max(max_firing, firing)
+                
+                if found_firing_rule:
+                    if max_firing >= 0.5:
+                        effect_str = "Strongly contributing to the elevated concern score"
+                    elif max_firing >= 0.2:
+                        effect_str = "Contributing to the elevated concern score"
+                    else:
+                        effect_str = "Slightly contributing to the concern score"
+                else:
+                    # Abnormal but no rules firing - possible issue
+                    effect_str = "Abnormal value but not triggering any rules"
             else:
-                top_signal = "—"
-            
-            # Raising/Lowering concern
-            concern_change = []
-            if var_name in inc_factors:
-                inc_label, inc_deg = inc_factors[var_name]
-                concern_change.append(f"↑ {inc_label} ({inc_deg:.2f})")
-            if var_name in dec_factors:
-                dec_label, dec_deg = dec_factors[var_name]
-                concern_change.append(f"↓ {dec_label} ({dec_deg:.2f})")
-            concern_str = ", ".join(concern_change) if concern_change else "—"
+                effect_str = "Minimal impact on the overall score"
             
             table_rows.append({
-                "Variable": var_name,
-                "What Each Number Suggests": what_suggests,
-                "Top Signals Influencing": top_signal,
-                "Raising/Lowering Concern": concern_str
+                "Vital Sign": var_name,
+                "Current Value": f"{x:g}",
+                "Clinical Status": status,
+                "Effect on Concern Score": effect_str
             })
         
+        st.markdown("**How each vital sign contributes to the overall concern:**")
         st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
     
     with tab2:
         st.subheader("NEWS2 vs Fuzzy Logic Comparison")
+        
+        # Note about oxygen mode
+        if "FiO2" in oxygen_mode:
+            st.info("⚠️ **Note:** NEWS2 uses Supplementary Oxygen (L/min), not FiO2. The NEWS2 score shown uses the baseline value (0 L/min) for oxygen delivery.")
         
         # Side-by-side comparison
         col1, col2 = st.columns(2)
@@ -493,21 +538,26 @@ if st.session_state.evaluation_result is not None:
         with col_mc2:
             show_uncertainties = st.checkbox("Customise uncertainties", value=False)
         
-        # Allow user to customise uncertainties if desired
-        uncertainties = default_uncertainties.copy()
+        # Allow user to customise uncertainties if desired (only for visible variables)
+        uncertainties = {}
+        for var in visible_vars:
+            if var in default_uncertainties:
+                uncertainties[var] = default_uncertainties[var]
+        
         if show_uncertainties:
             st.markdown("**Measurement uncertainties (± standard deviation):**")
             unc_cols = st.columns(3)
-            for idx, (var, default_unc) in enumerate(default_uncertainties.items()):
-                with unc_cols[idx % 3]:
-                    uncertainties[var] = st.number_input(
-                        f"{var}",
-                        min_value=0.0,
-                        value=default_unc,
-                        step=0.1,
-                        format="%.2f",
-                        key=f"unc_{var}"
-                    )
+            for idx, var in enumerate(visible_vars):
+                if var in default_uncertainties:
+                    with unc_cols[idx % 3]:
+                        uncertainties[var] = st.number_input(
+                            f"{var}",
+                            min_value=0.0,
+                            value=default_uncertainties[var],
+                            step=0.1,
+                            format="%.2f",
+                            key=f"unc_{var}"
+                        )
         
         # Initialize session state for MC results
         if "mc_results" not in st.session_state:
@@ -520,9 +570,12 @@ if st.session_state.evaluation_result is not None:
                 mc_results = []
                 
                 for _ in range(n_samples):
-                    # Perturb inputs
-                    perturbed_inputs = {}
-                    for var_name, value in inputs.items():
+                    # Perturb inputs - start with baseline inputs (includes inactive oxygen at baseline)
+                    perturbed_inputs = inputs.copy()
+                    
+                    # Only perturb visible variables
+                    for var_name in visible_vars:
+                        value = inputs[var_name]
                         mf = registry.get(var_name)
                         vmin, vmax = float(mf.values[0]), float(mf.values[-1])
                         
@@ -555,7 +608,8 @@ if st.session_state.evaluation_result is not None:
                     "ci_upper": ci_upper,
                     "base_concern": concern_pct,
                     "uncertainties": uncertainties.copy(),
-                    "inputs": inputs.copy()
+                    "inputs": inputs.copy(),
+                    "visible_vars": visible_vars.copy()
                 }
         
         # Display results if available
@@ -637,7 +691,8 @@ if st.session_state.evaluation_result is not None:
             sensitivities = []
             saved_inputs = stats["inputs"]
             saved_uncertainties = stats["uncertainties"]
-            for var_name in saved_inputs.keys():
+            saved_visible_vars = stats.get("visible_vars", list(saved_inputs.keys()))
+            for var_name in saved_visible_vars:
                 # Run mini MC varying only this input
                 mini_results = []
                 for _ in range(100):
